@@ -69,8 +69,8 @@ export function GomokuBoard({
               y1={i}
               x2={SPAN}
               y2={i}
-              stroke="rgba(255,255,255,0.16)"
-              strokeWidth={0.03}
+              stroke="rgba(255,255,255,0.32)"
+              strokeWidth={0.045}
               vectorEffect="non-scaling-stroke"
             />
           ))}
@@ -81,13 +81,13 @@ export function GomokuBoard({
               y1={0}
               x2={i}
               y2={SPAN}
-              stroke="rgba(255,255,255,0.16)"
-              strokeWidth={0.03}
+              stroke="rgba(255,255,255,0.32)"
+              strokeWidth={0.045}
               vectorEffect="non-scaling-stroke"
             />
           ))}
           {STAR_POINTS.map(([r, c]) => (
-            <circle key={`s${r}-${c}`} cx={c} cy={r} r={0.12} fill="rgba(255,255,255,0.35)" />
+            <circle key={`s${r}-${c}`} cx={c} cy={r} r={0.14} fill="rgba(255,255,255,0.55)" />
           ))}
         </svg>
 
