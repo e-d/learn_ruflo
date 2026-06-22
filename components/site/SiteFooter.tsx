@@ -22,7 +22,7 @@ export function SiteFooter() {
               rel="noopener noreferrer"
               className="font-medium text-[var(--color-ink)] underline decoration-[var(--color-accent-2)]/40 underline-offset-2 transition-colors hover:decoration-[var(--color-accent-2)]"
             >
-              Edward St. Louis
+              Ed St. Louis
             </a>
             <span className="hidden text-[var(--color-faint)] sm:inline">
               {" "}
