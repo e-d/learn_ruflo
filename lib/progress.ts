@@ -1,75 +1,89 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 const KEY = "ruflo:progress:v1";
 
 type Stored = { completed: string[]; lastVisited?: string };
 
-function read(): Stored {
-  if (typeof window === "undefined") return { completed: [] };
+/**
+ * A single module-level store shared by every component that calls
+ * useProgress, so marking a lesson complete updates the sidebar, footer, and
+ * controls instantly — no refresh. Backed by localStorage for persistence.
+ */
+let completed = new Set<string>();
+let lastVisited: string | undefined;
+let loaded = false;
+const listeners = new Set<() => void>();
+
+function load() {
+  if (loaded || typeof window === "undefined") return;
+  loaded = true;
   try {
-    return JSON.parse(localStorage.getItem(KEY) || "") as Stored;
+    const data = JSON.parse(localStorage.getItem(KEY) || "") as Stored;
+    completed = new Set(data.completed ?? []);
+    lastVisited = data.lastVisited;
   } catch {
-    return { completed: [] };
+    /* nothing stored yet */
   }
 }
 
-function write(data: Stored) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(KEY, JSON.stringify(data));
+function persistAndEmit() {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(KEY, JSON.stringify({ completed: [...completed], lastVisited }));
+  }
+  listeners.forEach((l) => l());
 }
 
-/**
- * Tutorial progress, persisted to localStorage (no auth needed). Returns a
- * Set of completed lesson slugs plus helpers. SSR-safe: starts empty, hydrates
- * on mount.
- */
+// Load eagerly on the client so the first post-hydration snapshot is correct.
+if (typeof window !== "undefined") load();
+
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+function getSnapshot() {
+  return completed; // stable reference until a mutation swaps it
+}
+const SERVER_EMPTY = new Set<string>();
+function getServerSnapshot() {
+  return SERVER_EMPTY;
+}
+
 export function useProgress() {
-  const [completed, setCompleted] = useState<Set<string>>(new Set());
+  const completedSet = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+
+  // Gate display until after mount to avoid a "0/9" flash before localStorage is read.
   const [hydrated, setHydrated] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => setHydrated(true), []);
 
-  useEffect(() => {
-    // Hydrate from localStorage once on mount (SSR renders the empty state,
-    // so this read can't run earlier without a hydration mismatch).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCompleted(new Set(read().completed));
-    setHydrated(true);
+  const markComplete = useCallback((slug: string) => {
+    if (completed.has(slug)) return;
+    completed = new Set(completed).add(slug);
+    persistAndEmit();
   }, []);
 
-  const persist = useCallback((next: Set<string>) => {
-    setCompleted(new Set(next));
-    write({ completed: [...next], lastVisited: read().lastVisited });
+  const toggle = useCallback((slug: string) => {
+    const next = new Set(completed);
+    if (next.has(slug)) next.delete(slug);
+    else next.add(slug);
+    completed = next;
+    persistAndEmit();
   }, []);
-
-  const markComplete = useCallback(
-    (slug: string) => {
-      const next = new Set(read().completed);
-      next.add(slug);
-      persist(next);
-    },
-    [persist],
-  );
-
-  const toggle = useCallback(
-    (slug: string) => {
-      const next = new Set(read().completed);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
-      persist(next);
-    },
-    [persist],
-  );
 
   const markVisited = useCallback((slug: string) => {
-    write({ completed: read().completed, lastVisited: slug });
+    lastVisited = slug;
+    if (typeof window !== "undefined") {
+      localStorage.setItem(KEY, JSON.stringify({ completed: [...completed], lastVisited }));
+    }
   }, []);
 
   return {
     hydrated,
-    completed,
-    isDone: (slug: string) => completed.has(slug),
-    count: completed.size,
+    completed: completedSet,
+    isDone: (slug: string) => completedSet.has(slug),
+    count: completedSet.size,
     markComplete,
     toggle,
     markVisited,
