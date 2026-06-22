@@ -67,7 +67,7 @@ export default function Home() {
       </section>
 
       {/* ---------------- Bento highlights ---------------- */}
-      <section className="grid auto-rows-[150px] grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="grid auto-rows-[minmax(150px,auto)] grid-cols-2 gap-4 lg:grid-cols-4">
         <BentoCard className="col-span-2 row-span-2 lg:col-span-2" accent>
           <h2 className="font-display text-2xl font-semibold">What you&apos;ll build</h2>
           <p className="mt-2 max-w-md text-[var(--color-muted)]">
