@@ -1,0 +1,145 @@
+The game is done. Five AI levels, an animated board, win detection, undo — it
+all works. The last skill ruflo teaches isn't about *writing* code. It's about
+**shipping** it: opening a pull request, getting it reviewed, cutting a release,
+and putting it in front of people. ruflo has four agents built exactly for this.
+
+## The four shipping agents
+
+These live under ruflo's GitHub surface. Each one wraps a slice of the
+ship workflow with swarm coordination:
+
+| Agent | Job |
+| --- | --- |
+| `pr-manager` | Open and manage PRs — branch sync, status, merge |
+| `code-review-swarm` | A multi-agent review pass over the diff |
+| `issue-tracker` | File and coordinate issues against the work |
+| `release-manager` | Cut a versioned release once review passes |
+
+The shape mirrors how a real team ships: someone opens the PR, reviewers go over
+the diff, findings get addressed, and a release is tagged. ruflo just gives each
+of those steps an agent.
+
+<Callout type="note" title="these are the commands you'd run">
+The blocks below are the **shipping workflow** for this project — illustrative
+commands, not a captured transcript. We're teaching the *capability* here: what
+each agent does and where it fits. Run them against your own repo when you're
+ready to ship.
+</Callout>
+
+## Step 1 — open the PR
+
+`pr-manager` handles the mechanics. The everyday entry point is the `gh` CLI,
+which the agent drives under the hood:
+
+```bash
+git checkout -b ship/gomoku-ai-ladder
+git push -u origin ship/gomoku-ai-ladder
+
+gh pr create \
+  --title "Gomoku: 5-level AI, animated board, undo" \
+  --body "Ships the full game built across the ruflo course." \
+  --base main --head ship/gomoku-ai-ladder
+```
+
+For a PR touching many files, `pr-manager` will spin up a small coordination
+swarm — a reviewer, a tester, a coordinator — so review and validation run in
+parallel instead of one-at-a-time. That's the "coordination pays for itself"
+line from lesson one showing up again: a one-file fix doesn't need it, a
+whole-game PR does.
+
+## Step 2 — run the review swarm over the diff
+
+This is the agent worth the price of admission. `code-review-swarm` spawns
+**specialized** reviewers — security, performance, style, architecture — and
+points them all at the same diff at once:
+
+```bash
+PR_DIFF=$(gh pr diff 1)
+
+npx ruflo github review-init \
+  --pr 1 \
+  --diff "$PR_DIFF" \
+  --agents "security,performance,style,architecture" \
+  --depth comprehensive
+```
+
+Each agent reviews through its own lens. For our game that means the performance
+agent eyes the AI worker's search loop, the architecture agent checks how the
+board, engine, and worker stay separated, and the style agent sweeps naming and
+formatting. The findings come back grouped by agent, so you read four focused
+reviews instead of one undifferentiated wall.
+
+<Callout type="ruflo" title="why a swarm and not one reviewer">
+A single reviewer flattens everything into one pass. Four specialized agents
+each go *deep* on one concern, in parallel — the same coordination idea that ran
+the whole course, now aimed at quality instead of construction.
+</Callout>
+
+## Step 3 — address findings, then cut the release
+
+You triage the findings the same way you would a human review: fix what matters,
+push the changes, let the swarm re-check. When the diff is clean, `release-manager`
+tags it:
+
+```bash
+git commit -am "review: address swarm findings"
+git push
+
+gh release create v1.0.0 \
+  --title "Gomoku v1.0.0" \
+  --notes "First release — 5-level AI, animations, undo, full board."
+```
+
+`issue-tracker` is the fourth agent in the set: when the review swarm surfaces
+something you'd rather defer than fix now, it files the issue and links it to the
+PR so nothing falls through the cracks.
+
+## Step 4 — deploy it
+
+This site is built **Vercel-ready** — a Next.js App Router app, lessons exported
+as static MDX. Deploying is intentionally boring:
+
+```bash
+# push to GitHub (done above), then either:
+vercel --prod
+# ...or click "Import Project" in the Vercel dashboard and point it at the repo.
+```
+
+Vercel detects Next.js, runs `npm run build`, and serves it. Connecting the repo
+once means every future push to `main` redeploys on its own — your `release-manager`
+tag and your live site stay in step without another command.
+
+<Callout type="warn" title="static export, real build">
+The lessons render at build time, so a broken MDX file fails the build rather
+than the page. If `vercel --prod` errors, it's almost always an MDX issue — an
+unescaped `<` or `{` in prose — not an infra problem. Fix the content and redeploy.
+</Callout>
+
+## What you've actually learned
+
+Step back and look at the full arc. You didn't learn ruflo as a list of 314
+tools — you learned its **shape**, and you earned each capability by making it do
+real work on one project:
+
+- **Skills** — the board came alive with clickable stones.
+- **Agents** — the execution surface for scoped, verifiable jobs like win detection.
+- **Memory** — real `store`/`search` calls kept decisions consistent across sessions.
+- **SPARC** — a spec-to-code discipline gave the AI engine its shape.
+- **Swarms** — a real fan-out swarm wrote these nine lessons in parallel.
+- **Hooks and workers** — the background automation layer on every tool call.
+- **Hive-mind and MCP** — consensus for judgment calls, tools discovered on demand.
+- **GitHub automation** — this lesson — the workflow that ships it.
+
+<Callout type="ruflo" title="the through-line">
+Every capability earned its place by doing real work on *this* project. That's
+the whole point: ruflo isn't a feature checklist to memorize, it's a set of
+tools you reach for exactly when coordination pays for itself — and not a moment
+sooner. You now know where that line is.
+</Callout>
+
+<Checkpoint snapshot={8}>
+The game is complete. Light plays five-in-a-row and wins — the board animates,
+the AI thinks, and the whole thing ships. You've finished the course.
+Congratulations. Head to the `/play` page and beat your own five-level
+opponent.
+</Checkpoint>

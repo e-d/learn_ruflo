@@ -1,0 +1,9 @@
+# ruflo runtime + local data — not part of the web app
+.claude
+.claude-flow
+.swarm
+ruvector.db
+*.db
+
+# tests + memory
+tests

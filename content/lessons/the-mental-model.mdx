@@ -1,0 +1,106 @@
+Before we write a line of game code, you need a map of what ruflo actually
+*is*. Most people bounce off ruflo because they try to memorize its surface —
+hundreds of MCP tools, dozens of commands — instead of its shape. The shape is
+small.
+
+## What ruflo is
+
+ruflo is an **agent meta-harness for Claude**. It doesn't replace Claude Code;
+it wraps it with three things you don't get out of the box:
+
+- **Coordination** — spin up teams of agents that divide work and message each other.
+- **Memory** — a vector database that remembers decisions and patterns across sessions.
+- **Automation** — hooks that fire on your tool calls, and background workers that sweep your codebase.
+
+Everything else (314 MCP tools, 30 skills, the daemon) is detail hanging off
+those three ideas.
+
+## The one mental model that matters
+
+ruflo exposes the same capabilities through three surfaces. Knowing which is
+which stops 90% of the confusion:
+
+| Surface | Job | Example |
+| --- | --- | --- |
+| **Agent tool** | **Execution** — files, code, git, running things | spawn a `coder` to implement a function |
+| **MCP tools** | **Coordination** — swarm, memory, hooks | `memory_store`, `swarm_init` |
+| **CLI** | The same, from a shell | `npx ruflo memory search …` |
+
+> Execution happens through agents. Coordination happens through MCP tools (or
+> the identical CLI). When something feels confusing, ask: "is this execution or
+> coordination?"
+
+## What we ran to get here
+
+Setting ruflo up is not a swarm task — it's three commands. Here's exactly what
+this project ran:
+
+```bash
+npx ruflo@latest init          # scaffold .claude/, memory, hooks, MCP config
+npx ruflo memory init          # create the vector memory database
+npx ruflo swarm init           # create a coordination topology
+npx ruflo daemon start         # (optional) background workers
+```
+
+`init` dropped a lot into the project in one shot:
+
+<Terminal title="npx ruflo@latest init">
++-------- Summary --------+
+| Directories: 12 created |
+| Files: 106 created      |
++-------------------------+
+
+Skills: 30 · Commands: 16 · Agents: 17 · Hooks: 7 enabled
+</Terminal>
+
+The daemon, if you start it, runs interval workers and self-stops after 12h:
+
+<Terminal title="npx ruflo daemon status">
+Status: ● RUNNING (background)   PID: 25899   TTL: 12h
+Workers: map · audit · optimize · consolidate · testgaps  (5 enabled)
+</Terminal>
+
+<Callout type="ruflo" title="what we actually did">
+Every command above was run live while building this very site. The daemon is
+**optional** — it spends tokens continuously because each worker spawns a
+headless Claude session. We started it to demo it, but you can run the entire
+workflow without it.
+</Callout>
+
+## The most important lesson first: when *not* to use ruflo
+
+Here's the judgment that separates people who like ruflo from people who fight
+it. We scaffolded this Next.js app **by hand** — no swarm, no agents. Why?
+
+Because ruflo's own guidance says so. Its `CLAUDE.md` ships a routing table:
+
+```md
+### When to Swarm
+- YES: 3+ files, new features, cross-module refactoring, security, performance
+- NO:  single file edits, 1-2 line fixes, docs, config changes, questions
+```
+
+Scaffolding is a config task. Wrapping it in a five-agent swarm would be slower,
+pricier, and more error-prone than just running `create-next-app`. A good ruflo
+user reaches for the harness when coordination *pays for itself* — and not a
+moment sooner. We'll feel exactly where that line is as the game gets more
+complex.
+
+<Callout type="warn" title="the anti-pattern">
+"Use the swarm for everything" is how ruflo earns a reputation for being slow
+and expensive. The harness is a power tool, not a default.
+</Callout>
+
+## Your game so far
+
+Right now the board just renders — a static 15×15 grid. That's the canvas. Over
+the next eight lessons every ruflo capability will add a layer to it, until you
+have a five-level AI opponent.
+
+<Checkpoint snapshot={0}>
+You should have ruflo initialized and the project running with `npm run dev`.
+The board renders but nothing is interactive yet — that's exactly right.
+</Checkpoint>
+
+In the next lesson we'll use **skills** — ruflo's reusable shortcuts — to make
+the board come alive with clickable stones.

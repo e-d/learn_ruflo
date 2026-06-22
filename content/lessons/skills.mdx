@@ -1,0 +1,160 @@
+## Skills: the shortcuts
+
+In the last lesson we drew a map of ruflo: execution through agents,
+coordination through MCP tools, and a pile of detail hanging off the side. One
+piece of that detail — `Skills: 30` in the init summary — is the single
+highest-leverage thing a beginner can learn. So we'll learn it while making the
+board come alive: by the end of this lesson, clicking an intersection places a
+stone, and turns alternate between the two players.
+
+## What a skill actually is
+
+A skill is a **packaged, reusable workflow** — instructions, conventions, and
+sometimes scripts — bundled under a name and invoked as a slash command.
+Instead of re-typing a careful multi-paragraph prompt every time you want a
+code review or a new feature scaffolded, you invoke the skill and it loads the
+right playbook.
+
+The mechanism that makes this cheap is **progressive disclosure**. A skill
+isn't dumped into the context window wholesale. ruflo keeps a one-line
+description of each of its skills in view; the full body only loads when the
+skill is actually invoked. That's how a project can carry 30 skills without
+drowning the model in instructions it doesn't need yet.
+
+<Callout type="note" title="skill vs. agent vs. command">
+Easy to conflate, worth separating: a **skill** is a *workflow* (the recipe),
+an **agent** is an *executor* (the cook), and a **command** is just how you
+*invoke* either one from chat. A skill often orchestrates agents — but you
+trigger it like any other slash command.
+</Callout>
+
+## The high-value skills
+
+You don't need all 30 on day one. These are the ones that earn their keep
+quickly:
+
+| Skill | What it does | Reach for it when |
+| --- | --- | --- |
+| `sparc-methodology` | Spec → Pseudocode → Architecture → Refinement → Completion | Building a feature you can't hold in your head at once |
+| `swarm-orchestration` | Spins up and coordinates a multi-agent swarm | Work spans 3+ files or modules |
+| `agentdb-memory-patterns` | Persistent memory patterns for stateful agents | The agent must remember across sessions |
+| `hooks-automation` | Wires pre/post tool hooks for formatting & coordination | You want something to fire automatically on every edit |
+| `pair-programming` | Driver/navigator loop with live verification | TDD, debugging, or refactoring with a second set of eyes |
+| `skill-builder` | Scaffolds a new skill with correct frontmatter & structure | You catch yourself repeating the same prompt |
+| `github-*` | Code review, PR management, releases, multi-repo | Anything that touches a GitHub workflow |
+
+Invoking one is just a slash command:
+
+```bash
+/sparc-methodology   build a 2-player Gomoku state machine
+```
+
+The `github-*` family is a small ecosystem on its own — `github-code-review`,
+`github-project-management`, `github-release-management`,
+`github-workflow-automation`, `github-multi-repo` — each a packaged version of
+a workflow you'd otherwise reconstruct from scratch every time.
+
+## When a skill beats a prompt
+
+The decision is the same one from the last lesson, just sharper. Reach for a
+skill when the work is **repeatable** — a workflow you'll run more than once,
+where consistency matters: scaffolding, reviews, releases, structured feature
+builds. Write a one-off prompt when the work is genuinely one-off.
+
+<Callout type="ruflo" title="what we actually did here">
+Honesty check: we did **not** use a skill to write the code in this lesson. The
+interactive board below is a single small reducer and one overlay — a one-file
+change. Wrapping it in `sparc-methodology` would be ceremony for its own sake.
+Skills shine on *repeatable* workflows. The place we'd genuinely reach for one
+on this project is later, when we add the AI opponent and want a consistent
+`pair-programming` loop with tests on every pass — or `github-code-review`
+before we ship. We hand-wrote this; we'll let a skill earn its place when the
+work repeats.
+</Callout>
+
+## Making the board interactive
+
+Until now the board only rendered. The state machine that turns clicks into
+moves already lives in `useGomoku.ts` — the heart of it is the `play()` action.
+It does three jobs in order: guard, place, advance.
+
+```ts {3,5,9} title="components/game/useGomoku.ts"
+const play = useCallback((r: number, c: number) => {
+  setState((s) => {
+    if (s.status !== "playing") return s;      // game over → ignore
+    const i = idx(r, c);
+    if (s.board[i] !== EMPTY) return s;          // occupied → ignore
+
+    const board = s.board.slice();               // copy, never mutate
+    board[i] = s.current;                        // place the current stone
+    // ...check for a win, else:
+    return { ...s, board, current: opponent(s.current), /* ...history */ };
+  });
+}, []);
+```
+
+Two guards keep the game honest: clicks are ignored once `status` leaves
+`"playing"`, and a click on an occupied cell is a no-op (`s.board[i] !== EMPTY`).
+When the move is legal, it copies the board (state stays immutable), drops the
+current player's stone, and — if nobody just won — flips the turn with
+`current: opponent(s.current)`. P1 is the light pearl stone and moves first; P2
+is dark obsidian.
+
+Now we wire that action into the board. `GomokuBoard` already accepts an
+optional `onPlay` callback — passing it is what flips the board from a picture
+into a control:
+
+```tsx {6} title="where the board is used"
+const { board, lastMove, status, play } = useGomoku();
+
+<GomokuBoard
+  board={board}
+  lastMove={lastMove}
+  onPlay={play}                       // [!code ++]
+  disabled={status !== "playing"}     // [!code ++]
+/>
+```
+
+Inside the component, that single prop does all the work. The board computes
+`interactive` and only then renders its interaction overlay:
+
+```tsx {1,5,10} title="components/game/GomokuBoard.tsx"
+const interactive = !!onPlay && !disabled;
+
+// ...later, the overlay:
+{interactive && (
+  <div role="grid" aria-label="Gomoku board" className="absolute inset-0">
+    {board.map((cell, i) => {
+      const filled = cell !== EMPTY;
+      return (
+        <button
+          disabled={filled}
+          onClick={() => onPlay?.(r, c)}   // ← calls play(r, c)
+          /* ...positioning... */
+        />
+      );
+    })}
+  </div>
+)}
+```
+
+Notice the design: `useGomoku` knows the *rules* and `GomokuBoard` knows the
+*pixels*, and `onPlay` is the only wire between them. The overlay renders one
+`button` per intersection, marks filled cells `disabled` so you can't stack
+stones, and is a real `role="grid"` of buttons — so it's keyboard-navigable, not
+just mouse-clickable. The same `play()` is what an AI wrapper will call later
+with the engine's chosen move, which is why the hook describes itself as
+"mode-agnostic."
+
+<LessonBoard snapshot={1} caption="Click any intersection — stones now alternate light then dark." />
+
+<Checkpoint snapshot={1}>
+Clicking an empty intersection now places a stone, and turns alternate between
+the light (P1) and dark (P2) players. Clicking an occupied cell does nothing,
+and the `play()` guard ignores input once the game ends. The board is a real
+two-player control — no AI yet, just the rules enforced.
+</Checkpoint>
+
+That `onPlay` wire is mode-agnostic on purpose. In the next lesson we introduce
+**agents** — and instead of a human clicking, we'll have an agent call the very
+same `play()` to make the board play *itself*.

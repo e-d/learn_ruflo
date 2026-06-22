@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Learn ruflo — build a Gomoku AI
 
-## Getting Started
+An interactive tutorial site that teaches [ruflo](https://github.com/ruvnet/ruflo)
+(an agent meta-harness for Claude) by incrementally building a polished Gomoku
+(five-in-a-row) game with a five-level AI opponent. Nine lessons, each pairing one
+ruflo capability with one piece of the game.
 
-First, run the development server:
+Built with **Next.js (App Router)**, **Tailwind CSS v4**, **Motion**, and **MDX**
+(Shiki-highlighted code via `rehype-pretty-code`).
+
+## Develop
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev      # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Verify
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build    # production build (also type-checks)
+npm run lint     # eslint
+npm test         # vitest — engine + AI unit/integration tests
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## What's inside
 
-## Learn More
+| Path | What |
+| --- | --- |
+| `app/` | Routes: `/` landing, `/learn/[lesson]` tutorial, `/play` the full game |
+| `content/lessons/*.mdx` | The nine lesson walkthroughs |
+| `content/lessons.config.ts` | Lesson catalog (single source of truth) |
+| `components/game/` | `GomokuBoard`, `useGomoku`, the engine, and the AI ladder |
+| `components/game/ai/` | `evaluate.ts` (shared scorer), `engine.ts` (L1–L5), `worker.ts` (Web Worker) |
+| `components/tutorial/` | `Checkpoint`, `Callout`, `Terminal`, code-copy, sidebar, progress |
+| `tests/` | `engine`, `ai`, and full-playthrough tests |
 
-To learn more about Next.js, take a look at the following resources:
+## Deploy to Vercel
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The app is Vercel-ready (Next.js is auto-detected). Push to GitHub and import the
+repo in the Vercel dashboard, or:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+vercel --prod
+```
 
-## Deploy on Vercel
+Set `NEXT_PUBLIC_SITE_URL` to your deployed origin so Open Graph metadata resolves
+to absolute URLs.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+> This project lives alongside a ruflo install (`.claude/`, `.claude-flow/`,
+> `.mcp.json`). `CLAUDE.md` holds the ruflo harness guidance; it imports Next.js's
+> `AGENTS.md` rules at the bottom.

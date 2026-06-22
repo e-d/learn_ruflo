@@ -1,0 +1,194 @@
+The board takes clicks now and someone has to play against. Before we write the
+opponent, we're going to design it — and ruflo has a name for designing before
+coding: **SPARC**. It's five phases that take you from a vague want
+("the AI should be smart") to code you can verify. ruflo packages SPARC as a
+skill and an agent set, but the value is the *discipline*, not the tooling.
+
+## The five phases
+
+SPARC is an acronym you walk top to bottom. Each phase produces an artifact the
+next one consumes:
+
+| Phase | Produces | Our AI's version |
+| --- | --- | --- |
+| **S**pecification | What it must do | "block fours, build threes, take wins" |
+| **P**seudocode | The shape of the algorithm | "score every legal move, pick the best" |
+| **A**rchitecture | How the pieces fit | one shared evaluator, reused by every level |
+| **R**efinement | Make it correct & fast | the no-clone scoring trick |
+| **C**ompletion | Prove it works | unit tests on known positions |
+
+> The point of SPARC is that you never skip straight to code. By the time you
+> open the editor, the hard thinking is already done — you're transcribing a
+> design, not inventing one.
+
+<Callout type="ruflo" title="what we actually did">
+We designed the first two AI levels *before* writing a line of `evaluate.ts`,
+walking these exact phases by hand (guided by upfront research). ruflo packages
+SPARC as a skill that runs this same flow with agents — but the discipline is the
+value, not the tooling. The architecture decision in particular saved us from
+writing five separate evaluators.
+</Callout>
+
+## S — Specification
+
+Specification is where you pin down behavior in plain language, including the
+edge cases. For a Gomoku opponent the non-negotiables are small:
+
+- If I can win this turn, **win** — never pass up an immediate five.
+- If the opponent can win next turn, **block** that point.
+- Otherwise, prefer moves that **build my own threats** (open threes, fours)
+  while **denying** the opponent's.
+- Only ever consider cells **near existing stones** — the rest of the board is
+  noise.
+
+That last bullet is a real constraint, not a nicety: a 15×15 board has 225
+cells, and scoring all of them every turn is wasteful when only a handful are
+live.
+
+## P — Pseudocode
+
+Pseudocode turns the spec into an algorithm without committing to syntax. The
+core idea is *score each candidate move, then argmax*:
+
+```text
+for each empty cell near a stone:
+    offense = value of my lines through this cell
+    defense = value of the opponent's lines through this cell
+    score   = offense + (slightly more) * defense
+pick the highest-scoring cell
+```
+
+The "value of a line" needs its own table. A run of stones is worth more the
+longer it is and the more open ends it has — an open four (winnable two ways) is
+far scarier than a four blocked on one side. That table became `patternScore`:
+
+```ts
+function patternScore(len: number, openEnds: number): number {
+  if (len >= 5) return FIVE;            // already won
+  if (openEnds === 0) return 0;         // blocked both sides — dead
+  switch (len) {
+    case 4: return openEnds === 2 ? 100_000 : 10_000; // open four vs four
+    case 3: return openEnds === 2 ? 1_000  : 100;     // open three vs closed
+    case 2: return openEnds === 2 ? 100    : 10;
+    default: return openEnds === 2 ? 10 : 1;
+  }
+}
+```
+
+The jumps are deliberately huge. An open four (`100_000`) dwarfs everything
+below it, so a move that makes one always wins the argmax — the spec's "take
+wins, block losses" falls out of the numbers instead of needing special cases.
+
+## A — Architecture
+
+Architecture is the decision that pays off five lessons from now. We have a
+ladder of difficulty levels planned. The naive design is five separate AIs. The
+SPARC design is **one shared evaluator** with progressively smarter search
+wrapped around it.
+
+That single decision is why `evaluate.ts` exports a `moveHeuristic` that every
+level calls, and a `candidates()` that every level uses to find live cells:
+
+```ts
+export function moveHeuristic(board: Cell[], r: number, c: number, player: Cell): number {
+  const offense = lineScoreThrough(board, r, c, player);
+  const defense = lineScoreThrough(board, r, c, opponent(player));
+  return offense + 1.1 * defense;
+}
+```
+
+```ts
+// Empty cells within Chebyshev `radius` of an existing stone (center if none).
+export function candidates(board: Cell[], radius = 1): Coord[] { /* ... */ }
+```
+
+The `1.1 * defense` weight is the spec's "slightly more" made concrete: when two
+moves are otherwise tied, the AI prefers the one that also blocks the opponent.
+
+<Callout type="note" title="why this matters later">
+Levels 3, 4 and 5 don't replace `moveHeuristic` — they *call* it, both to score
+leaf positions and to order which moves to search first. Good architecture means
+the search levels are thin wrappers, not rewrites.
+</Callout>
+
+## R — Refinement
+
+Refinement is where a working design becomes a *good* one. Our move scorer needs
+to ask "how good is this cell for me?" — but the cell is empty. The obvious
+implementation clones the board, drops a stone in, scores, and throws the clone
+away. Per move. For dozens of moves. Every turn.
+
+The fix is the comment that makes `lineScoreThrough` work without cloning:
+
+```ts
+// lineScoreThrough treats (r,c) as the given player's stone implicitly (it
+// never reads the center cell), so we can score both offense and defense
+// without cloning/mutating the board.
+const offense = lineScoreThrough(board, r, c, player);
+const defense = lineScoreThrough(board, r, c, opponent(player));
+```
+
+`lineScoreThrough` walks *outward* from `(r,c)` in each direction and never reads
+the center cell itself — it assumes the stone is there. So one call scores
+"what if I play here," and a second call with `opponent(player)` scores "what
+threat do I deny here," both on the untouched board. No allocation, no mutation.
+On the search levels, where this runs thousands of times per move, that's the
+difference between snappy and sluggish.
+
+<Callout type="warn" title="refinement is not gold-plating">
+We refined exactly one thing: the hot path the spec told us would run most
+often. SPARC's refinement phase is targeted optimization, not a license to
+rewrite everything until it's "clean."
+</Callout>
+
+## C — Completion
+
+Completion means the spec's claims are *checked*, not hoped for. Each bullet from
+Specification maps to an assertion: place four-in-a-row with an open end, confirm
+the AI takes the five; give the opponent an open four, confirm the AI blocks it.
+With the evaluator verified, wiring up the first two levels is almost
+declarative:
+
+```ts
+export const AI_LEVELS = [
+  { level: 1, name: "Random",    blurb: "Plays anywhere near the action. Clueless." },
+  { level: 2, name: "Heuristic", blurb: "Scores each move; blocks & builds. No look-ahead." },
+  // levels 3-5 arrive later
+];
+```
+
+`chooseMove` reads almost exactly like the spec. Level 1 is "random near the
+action"; everything above it first grabs a win, then blocks a loss; and level 2
+stops at the greedy argmax with no look-ahead:
+
+```ts
+// L1 — random near the action
+if (level === 1) return cs[Math.floor(Math.random() * cs.length)];
+
+// Every level above 1: take an immediate win, then block an immediate loss.
+for (const [r, c] of cs)
+  if (checkWin(place(board, r, c, me), r, c, me)) return [r, c];
+const oppWins = winningMoves(board, opponent(me));
+if (oppWins.length > 0) return /* the most valuable block */;
+
+// L2 — greedy single-move heuristic (no look-ahead)
+if (level === 2)
+  return [...cs].sort((a, b) =>
+    moveHeuristic(board, b[0], b[1], me) - moveHeuristic(board, a[0], a[1], me))[0];
+```
+
+Notice there's no minimax here, no tree, no depth. Level 2 is genuinely just
+"score every candidate, take the best one" — and because the score table makes
+wins and blocks dominate, it already plays a respectable game.
+
+<Checkpoint snapshot={4}>
+You now have a playable opponent: level 1 flails near the stones, level 2 scores
+every live cell and plays the best one — taking wins and blocking losses without
+ever looking ahead. The whole thing came out of one SPARC pass.
+</Checkpoint>
+
+<LessonBoard snapshot={4} caption="Level 2 blocks your open four instead of building its own line." />
+
+Level 2 can't see a trap coming, though — it only scores *this* move. Next we'll
+give the AI a search tree and let a **swarm** of agents build the look-ahead
+levels in parallel.

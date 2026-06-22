@@ -1,0 +1,143 @@
+Your agent has been forgetting things. Every session it rediscovers that this
+project uses a flat board array, that win detection scans four axes, that the AI
+lives in a Web Worker. None of that survives a context reset. ruflo's **memory**
+fixes exactly this — a persistent store the agent searches *before* it works and
+writes to *after* it succeeds.
+
+## What memory actually is
+
+ruflo ships a persistent vector database. It isn't a key-value cache bolted on —
+it embeds what you store as **384-dimensional vectors** and indexes them with
+**HNSW**, so you can search by *meaning*, not exact keys. A hybrid backend keeps
+the raw value alongside the vector, so a lookup returns both the text you saved
+and a similarity score.
+
+Two namespaces do most of the work:
+
+| Namespace | Holds | Lifespan |
+| --- | --- | --- |
+| `project` | decisions specific to *this* codebase | one project |
+| `patterns` | reusable techniques worth carrying forward | many projects |
+
+> Memory is **coordination**, not execution — it's an MCP tool (`memory_store`,
+> `memory_search`) with an identical CLI. The agent doesn't edit files to
+> remember; it writes to the store.
+
+## The workflow: search before, store after
+
+The whole discipline is two bookends around a task:
+
+- **Before** — search memory for prior decisions so you don't re-derive them.
+- **After** — if the work succeeded, store what worked so the next session inherits it.
+
+Here's that workflow run live on this project. First we recorded the decisions
+behind the game engine into the `project` namespace:
+
+<Terminal title='npx ruflo memory store --namespace project --key "tutorial-project-decisions"'>
+  Key:       tutorial-project-decisions
+  Namespace: project
+  Size:      642 bytes
+  Vector:    Yes (384-dim)
+
+  [OK] Data stored successfully
+</Terminal>
+
+Sessions later, before asking an agent to build the AI opponent, we searched —
+not by the key, but by a description of the *problem*:
+
+<Terminal title='npx ruflo memory search --query "gomoku win detection minimax alpha-beta evaluation patterns"'>
+  Search time: 7ms
+
+  1 result:
+    key:       tutorial-project-decisions
+    namespace: project
+    score:     0.32
+</Terminal>
+
+That `0.32` is a semantic match — the query shares **no exact words** with the
+stored key, yet HNSW surfaced it in 7ms. The agent reads the hit and starts the
+task already knowing the engine's shape.
+
+When the task verified clean, we promoted the reusable part to `patterns`:
+
+<Terminal title='npx ruflo memory store --namespace patterns --key "gomoku-engine-verified"'>
+  Key:       gomoku-engine-verified
+  Namespace: patterns
+  Vector:    Yes (384-dim)
+
+  [OK] Data stored successfully
+</Terminal>
+
+<Callout type="warn" title="store after success, not before">
+The "after" half only fires once work is *verified*. Storing a half-finished or
+broken approach poisons future searches — the agent will confidently recall a
+pattern that never worked.
+</Callout>
+
+## Your game gains a memory of its own
+
+Fittingly, this lesson's game increment is the board learning to remember its
+own past: **move history, undo, and a last-move highlight**.
+
+The hook tracks every placement in play order, plus the most recent coordinate:
+
+```ts
+export type GameState = {
+  board: Cell[];
+  // ...
+  history: number[];     // move indices in play order  // [!code ++]
+  lastMove: Coord | null; // for the highlight ring      // [!code ++]
+};
+```
+
+Undo is the interesting part. Rather than snapshotting the whole board on every
+move, `undo(count)` **replays history** to reconstruct the position — the same
+idea as memory recall, rebuilt from a log:
+
+```ts {3,5-9}
+const undo = useCallback((count = 1) => {
+  setState((s) => {
+    const history = s.history.slice(0, -Math.min(count, s.history.length));
+    const board = newBoard();
+    let current: Cell = P1;
+    for (const i of history) {
+      board[i] = current;        // re-lay each remembered move
+      current = opponent(current);
+    }
+    // ...recompute lastMove from the trimmed history
+  });
+}, []);
+```
+
+The default `count` is `1`, but we pass `2` to take back a human + AI move as a
+pair. And the highlight ring lives in `Stone.tsx`, keyed by a shared
+`layoutId` so it animates smoothly from the old square to the new one:
+
+```tsx
+{last && (
+  <motion.span
+    layoutId="last-move"
+    className="absolute inset-0 rounded-full ring-2 ring-[var(--color-accent-2)]"
+  />
+)}
+```
+
+<LessonBoard snapshot={3} caption="Place a few stones — the last move wears a ring. Undo replays history back." />
+
+<Callout type="ruflo" title="history and memory are the same trick">
+The game keeps a move log so it can *undo* — replay the past instead of losing
+it. ruflo's memory does the same thing one level up: it logs decisions so the
+agent can "undo" wasted re-discovery, recalling what worked instead of deriving
+it from scratch. Honest caveat: this pays off **across sessions**. For a single
+throwaway task you'll never revisit, the store-and-search ceremony is overhead —
+reach for memory when the knowledge has a future.
+</Callout>
+
+<Checkpoint snapshot={3}>
+You should be able to place stones, see the last move ringed, and undo back
+through history one or two moves at a time. The board now remembers — just like
+the agent building it.
+</Checkpoint>
+
+Next we'll give the agent a *process* to go with its memory: **SPARC**, ruflo's
+spec-to-code methodology, which we'll use to design the AI opponent properly.

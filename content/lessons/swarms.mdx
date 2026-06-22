@@ -1,0 +1,163 @@
+A single agent is a craftsman. A **swarm** is a crew. So far every lesson has
+handed one agent one job. This time the job is too big for that — we're building
+a real opponent: a look-ahead search engine that has to be designed, coded,
+tested, and reviewed without freezing the page. That's a team task, and ruflo
+has a shape for teams.
+
+## What a swarm is
+
+A swarm is a set of **named agents** working the same objective at the same
+time. They aren't isolated — they coordinate. ruflo's default wiring is the
+**hierarchical-mesh** topology: a coordinator sits on top (hierarchical, for
+anti-drift control) while the workers can also talk peer-to-peer (mesh, for
+speed). The project is capped at **15 agents** — enough for any real feature,
+small enough that coordination doesn't collapse under its own weight.
+
+| Topology | Shape | Best for |
+| --- | --- | --- |
+| `hierarchical` | Coordinator drives workers | Tight control, anti-drift |
+| `mesh` | Peers talk directly | Distributed, fast |
+| `hierarchical-mesh` | Both at once (our default) | Real features, 10+ agents |
+
+## How they coordinate: SendMessage first
+
+The thing that makes a swarm more than parallel monologue is **SendMessage**.
+Instead of every agent reporting only upward and waiting, an agent messages a
+named teammate directly — the coder pings the tester the moment a function is
+ready; the reviewer flags the architect without a round-trip through the
+coordinator. Coordination is the conversation, not the org chart.
+
+That conversation tends to fall into one of three patterns:
+
+| Pattern | Flow | When |
+| --- | --- | --- |
+| **Pipeline** | A → B → C → D | Each stage needs the last one's output |
+| **Fan-out** | lead → A, B, C → lead | Independent work, gather at the end |
+| **Supervisor** | lead delegates, checks, re-delegates | Quality gates between steps |
+
+For our AI we want a pipeline: design the search, then implement it, then prove
+it, then review it. Each stage feeds the next.
+
+```bash
+npx ruflo swarm spawn \
+  --topology hierarchical-mesh \
+  architect coder tester reviewer
+```
+
+The `architect` shapes the negamax search and the worker boundary, hands the
+contract to `coder` via SendMessage, `coder` implements and pings `tester`, and
+`reviewer` reads the diff before it lands. Four named agents, one objective.
+
+<Callout type="warn" title="still the same judgment">
+Recall the rule from lesson one: **YES** for 3+ files, new features, or
+cross-module work; **NO** for single edits, config, or questions. A search
+engine plus a worker plus a hook into the UI is squarely a YES. A swarm earns
+its cost here — it would have been waste in lesson one.
+</Callout>
+
+## What this builds: a search-based AI
+
+Levels 1 and 2 only looked at the current board. Level 3 and up actually
+*think ahead*. The core is a negamax search that scores a position from `me`'s
+point of view — maximizing on our turn, minimizing on the opponent's:
+
+```ts
+function search(board, toMove, depth, alpha, beta, prune, me, limit): number {
+  if (depth === 0) return evaluateBoard(board, me);
+  const cs = ordered(board, toMove, limit);
+
+  if (toMove === me) {
+    let best = -Infinity;
+    for (const [r, c] of cs) {
+      const b = place(board, r, c, toMove);
+      const val = checkWin(b, r, c, toMove)
+        ? WIN_SCORE + depth // prefer faster wins
+        : search(b, opponent(toMove), depth - 1, alpha, beta, prune, me, limit);
+      if (val > best) best = val;
+      if (best > alpha) alpha = best;
+      if (prune && alpha >= beta) break; // [!code ++]
+    }
+    return best;
+  }
+  // ...the opponent branch mirrors this, minimizing instead
+}
+```
+
+Two things make this fast enough to run in a browser. First, the **alpha-beta
+cutoff** — that `if (prune && alpha >= beta) break` — abandons a branch the
+moment it can't beat what we've already found. Second, and this is what makes
+the cutoff actually bite, **move ordering**: `ordered()` sorts the candidate
+moves by `moveHeuristic` so the strongest moves are tried first, which means the
+pruning fires early and often.
+
+```ts
+function ordered(board, toMove, limit): Coord[] {
+  return candidates(board, 1)
+    .map(([r, c]) => ({ r, c, s: moveHeuristic(board, r, c, toMove) }))
+    .sort((a, b) => b.s - a.s)
+    .slice(0, limit)
+    .map(({ r, c }) => [r, c] as Coord);
+}
+```
+
+Level 3 is plain minimax at depth {2} with no pruning. Level 4 turns on the
+pruning and ordering and goes to depth {4} — the same engine, far deeper, for
+roughly the same wall-clock cost. That's the whole payoff of a well-ordered
+alpha-beta search.
+
+## Don't freeze the page: run it in a worker
+
+A depth-4 search is CPU-heavy and **synchronous**. Run it on the main thread and
+the board locks, the "thinking" animation stalls, clicks queue up. So the search
+runs in a **Web Worker** — a background thread:
+
+```ts
+self.onmessage = (e: MessageEvent<Req>) => {
+  const { board, player, level, reqId } = e.data;
+  const move = chooseMove(board, player, level);
+  (self as unknown as Worker).postMessage({ move, reqId });
+};
+```
+
+The `useAI` hook owns the worker, tracks a `thinking` flag, and — crucially —
+**falls back to the main thread** if the worker can't be created, so the game
+never simply breaks:
+
+```ts
+const w = workerRef.current;
+if (w) {
+  const id = ++reqId.current;
+  pending.current.set(id, (move) => settle(move, resolve));
+  w.postMessage({ board, player, level, reqId: id });
+} else {
+  // main-thread fallback — defer a tick so React can paint "thinking"
+  window.setTimeout(() => settle(chooseMove(board, player, level), resolve), 0);
+}
+```
+
+<LessonBoard snapshot={5} caption="Level 4 thinking — the board stays live while the worker searches." />
+
+<Callout type="ruflo" title="you are reading swarm output">
+A little meta: the nine lessons on this site were themselves written by a real
+ruflo **fan-out** swarm — one agent per lesson, all running in parallel, each
+reading the actual source files it describes. The lead handed out the nine
+briefs, the agents worked independently, and the lead gathered the results. The
+page you're reading is the output of the very pattern this lesson is about.
+</Callout>
+
+## Your game so far
+
+You now have a genuinely strong opponent. Level 4 looks four moves ahead, prunes
+ruthlessly, and runs entirely off the main thread — so a real search engine
+plays you without the page ever stuttering. Design, code, test, review — a
+multi-part build like this is exactly the shape a swarm is for.
+
+<Checkpoint snapshot={5}>
+Pick Level 3 or 4 and play a few stones. Notice the brief "thinking" pause, then
+a move that anticipates your traps — and notice that the board never freezes
+while it computes. That's the worker doing its job.
+</Checkpoint>
+
+Next we'll wire the rest of the harness into the page itself with **hooks &
+workers** — how ruflo fires automation on your tool calls and keeps background
+threads working for you.

@@ -1,0 +1,174 @@
+In the last lesson we drew the line: coordination is for work that pays for it.
+Now we cross that line on purpose. We're going to add **win detection** — the
+piece that turns a board you can click into a game you can *win* — and we'll let
+ruflo's **agents** do the building.
+
+## What an agent actually is
+
+The Agent tool is ruflo's **execution** surface. An agent is a fresh Claude
+session with a focused brief, its own tools, and a single job. You don't chat
+with it; you hand it a task, it touches files, runs code, talks to git, and
+reports back. That's the whole idea — execution lives in agents, coordination
+lives in the MCP tools around them.
+
+ruflo ships a roster of **agent types**, each tuned for one kind of work:
+
+| Type | Job |
+| --- | --- |
+| `coder` | Write and modify code |
+| `reviewer` | Read a diff, flag bugs and smells |
+| `tester` | Write and run tests, prove behavior |
+| `planner` | Break an objective into ordered tasks |
+| `researcher` | Investigate, gather facts, summarize |
+| `system-architect` | Shape modules and boundaries |
+| `security-architect` | Threat-model and harden |
+| `performance-engineer` | Profile and optimize hot paths |
+| coordinators | Run topologies and route work to the others |
+
+## How ruflo decides who does what
+
+You rarely pick an agent by hand. ruflo keeps a **routing table** that maps a
+task's shape to the right roster. A self-contained function with clear
+correctness rules — exactly what win detection is — routes to a short pipeline:
+
+```md
+### Routing
+- new feature, well-specified, testable  →  coder → tester
+- risky / cross-cutting refactor          →  planner → coder → reviewer → tester
+- "is this safe?"                         →  security-architect
+- "why is this slow?"                     →  performance-engineer
+```
+
+When more than one agent is involved, they don't shout into the void. ruflo
+gives each a **name** and they coordinate with `SendMessage` — the `coder`
+hands the finished function to the `tester` by name, the `tester` messages back
+pass/fail. Names turn a pile of agents into a relay.
+
+<Callout type="note" title="agent vs. inline">
+Spawn an agent when the work is big enough that a focused session beats doing it
+in your own context: a whole feature, a multi-file change, anything you'd want
+*verified*. Do it inline when it's a one-liner. Win detection is right on the
+"spawn it" side — it's small, but it's logic you must trust completely.
+</Callout>
+
+## The feature: checkWin
+
+Win detection has one trick worth understanding. After a move at `(r, c)`, the
+only line that could have *just* completed is a line through that stone. So we
+never scan the whole board — we scan the **four axes** through the last move:
+vertical, horizontal, and both diagonals.
+
+```ts {1,4}
+/** The four axes to scan for a win: vertical, horizontal, and both diagonals. */
+export const DIRS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [0, 1],
+  [1, 1],
+  [1, -1],
+];
+```
+
+For each axis we start with the stone we just played, walk **forward** counting
+matching stones, then walk **backward** counting more, and collect the run. Five
+or more contiguous stones is a win. Freestyle rules: an overline (six or more)
+counts too.
+
+```ts {2,8-13,20}
+export function checkWin(
+  board: Cell[],
+  r: number,
+  c: number,
+  player: Cell,
+): Coord[] | null {
+  for (const [dr, dc] of DIRS) {
+    const line: Coord[] = [[r, c]];
+    // walk forward
+    for (let s = 1; s < SIZE; s++) {
+      const nr = r + dr * s,
+        nc = c + dc * s;
+      if (!inBounds(nr, nc) || board[idx(nr, nc)] !== player) break;
+      line.push([nr, nc]);
+    }
+    // walk backward
+    for (let s = 1; s < SIZE; s++) {
+      const nr = r - dr * s,
+        nc = c - dc * s;
+      if (!inBounds(nr, nc) || board[idx(nr, nc)] !== player) break;
+      line.unshift([nr, nc]);
+    }
+    if (line.length >= 5) return line;
+  }
+  return null;
+}
+```
+
+It returns the winning run of coordinates — handy later for highlighting the
+line on the board — or `null` when nothing connected. Because it only ever
+touches four axes, it's O(1) per move, no matter how full the board gets.
+
+## Wiring it into the game
+
+`useGomoku` already had a `play()` reducer. Win detection slots in right after we
+place the stone: call `checkWin`, and if it returns a line, freeze the game as
+`won`. Otherwise check for a full board (`draw`), or flip to the other player.
+
+```ts {4,5-13}
+const board = s.board.slice();
+board[i] = s.current;
+
+const line = checkWin(board, r, c, s.current); // [!code ++]
+if (line) {                                    // [!code ++]
+  return {                                     // [!code ++]
+    ...s,                                      // [!code ++]
+    board,                                     // [!code ++]
+    status: "won",                             // [!code ++]
+    winner: s.current,                         // [!code ++]
+    winningLine: line,                         // [!code ++]
+    history: [...s.history, i],                // [!code ++]
+    lastMove: [r, c],                          // [!code ++]
+  };                                           // [!code ++]
+}
+if (isBoardFull(board)) {
+  return { ...s, board, status: "draw", history: [...s.history, i], lastMove: [r, c] };
+}
+```
+
+That single check is the difference between an endless placement toy and a real
+two-player game. The reducer stays pure — same input, same output — which is
+exactly why a `tester` can pin it down.
+
+<Callout type="ruflo" title="how you'd run this as a pipeline">
+Win detection is a textbook `coder → tester` job. The workflow: spawn a named
+`coder` with the brief "implement freestyle `checkWin(board, r, c, player)`,
+return the winning run," and have it hand off via `SendMessage` to a named
+`tester` that writes a vitest suite and runs it green. On *this* project we
+hand-wrote `checkWin` and its tests directly — it's small enough that the
+pipeline would have been ceremony — but the suite is real: it asserts a
+**horizontal** five, a **vertical** five, **both diagonals**, and an
+**overline** (six still wins), and that exactly **four** does *not*. The rule
+that matters holds either way: verify the function, however you build it.
+</Callout>
+
+<Callout type="warn" title="don't over-route">
+We used a two-agent pipeline, not a five-agent swarm. There's no risky refactor
+here and nothing cross-cutting, so a `reviewer` and `planner` would have been
+ceremony. Match the roster to the task — the routing table exists so you don't
+reach for more agents than the work needs.
+</Callout>
+
+## Your game so far
+
+You can now play a complete game. Click to drop stones, alternate turns, and the
+moment five connect the board locks with a winner; fill it with no line and it's
+a draw.
+
+<LessonBoard snapshot={2} caption="Two players, real stakes — first to five wins." />
+
+<Checkpoint snapshot={2}>
+Two players can play start to finish: alternating turns, a detected win that
+freezes the board and names the winner, and a draw on a full board. Try landing
+a horizontal, a diagonal, and an overline.
+</Checkpoint>
+
+Next we'll give ruflo a **memory** — so the agents building our AI opponent can
+remember decisions across sessions instead of relearning the board every time.

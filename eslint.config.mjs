@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // ruflo's injected runtime helpers — not our app code.
+    ".claude/**",
+    ".claude-flow/**",
   ]),
 ]);
 

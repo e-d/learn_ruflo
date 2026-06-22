@@ -1,0 +1,170 @@
+This is the capstone. You already have agents, skills, and memory. The last two
+ruflo ideas — **hive-mind consensus** and the **MCP tool surface** — are what
+turn a pile of agents into something that makes *decisions*. Then we'll build
+the strongest opponent in the game, and finish with the most important skill of
+all: knowing when to put the harness down.
+
+## Hive-mind: agents that converge on an answer
+
+A swarm divides work. A **hive-mind** does something different — it points
+several agents at the *same* question and makes them agree. You spin one up,
+spawn workers into it, then ask for a verdict:
+
+```bash
+npx ruflo hive-mind init           # create the shared mind
+npx ruflo hive-mind spawn --role reviewer --count 3
+npx ruflo hive-mind consensus "is this AI design sound?"
+```
+
+The same three steps exist as MCP tools — `hive-mind_init`, `hive-mind_spawn`,
+and `hive-mind_consensus` — so an agent can run the whole loop without a shell.
+`consensus` is the payoff: each worker votes, and you get back a decision plus
+the dissent, not just one model's hot take.
+
+<Callout type="ruflo" title="how you'd use it here">
+Designing the level-5 AI was a genuine judgment call — is threat-space search
+worth the complexity over plain alpha-beta? That's exactly a consensus question:
+you'd spin up a few `reviewer` agents, ask `hive-mind consensus`, and get back a
+decision plus the dissent. On this project we made the call from upfront research
+— "yes, but only as a fast pre-pass" — which is the design you're about to read.
+</Callout>
+
+## MCP: hundreds of tools you discover, never memorize
+
+`hive-mind_consensus` is one of **hundreds** of MCP tools ruflo exposes. Nobody
+memorizes that list — you *discover* tools on demand. When an agent needs a
+capability, it searches for it with `ToolSearch` and the matching schemas load
+right then:
+
+```text
+ToolSearch("select:hive-mind_init,hive-mind_consensus")
+→ schemas for both tools load, now callable
+```
+
+This is the trick that keeps the surface from drowning you: the names are
+visible, the full schemas arrive only when asked for. The same on-demand
+philosophy runs underneath in ruflo's **3-tier model routing**:
+
+| Tier | Handles | Cost |
+| --- | --- | --- |
+| Skip-LLM | deterministic transforms (formatting, parsing) | ~free |
+| Haiku | small, mechanical reasoning | cheap |
+| Sonnet / Opus | hard design + synthesis | expensive |
+
+> Discovery over memorization, cheapest-tier-that-works over biggest-model. Both
+> rules exist so the harness scales without your wallet or context window paying
+> for capability you never touched.
+
+## The game: level 5, threat-space search
+
+Levels 3 and 4 search a tree of *all* reasonable moves. That tree explodes with
+depth, so even alpha-beta can only see four plies out. Level 5 adds a smarter
+weapon that runs *before* the general search: **VCF — Victory by Continuous
+Fours**.
+
+The insight: only search **forcing** moves. If your move makes a *four* (four in
+a row with one open end), the opponent has exactly one legal reply — block the
+fifth point or lose. One forced reply means the tree branches by *one*, not by
+twenty. So it stays pencil-thin and you can chase it very deep, very cheaply.
+
+Here's the real recursion from `engine.ts`:
+
+```ts
+function vcf(board: Cell[], me: Cell, depth: number): Coord | null {
+  if (depth <= 0) return null;
+  for (const [r, c] of ordered(board, me, 16)) {
+    const b = place(board, r, c, me);
+    if (checkWin(b, r, c, me)) return [r, c]; // made five
+    const myWins = winningMoves(b, me);
+    if (myWins.length === 0) continue;        // not a forcing four
+    if (myWins.length >= 2) return [r, c];     // open/double four — unstoppable // [!code ++]
+
+    // single four: opponent is forced to block the one winning point
+    const [br, bc] = myWins[0];
+    const b2 = place(b, br, bc, opponent(me));
+    if (winningMoves(b2, opponent(me)).length > 0) continue; // block wins → refuted
+    if (vcf(b2, me, depth - 1)) return [r, c];
+  }
+  return null;
+}
+```
+
+Trace the three outcomes per move. `winningMoves` reports every cell where `me`
+would immediately win, so its length is the whole tell:
+
+- {0} winning replies → the move isn't a forcing four, skip it.
+- {2} or more → a double-four or open-four. The opponent can block only one;
+  the other wins next turn. That's an **immediate win** — return it.
+- exactly {1} → a single four. Place the opponent's forced block, then recurse.
+  If the line keeps forcing all the way to five, it's won.
+
+The one escape hatch: if the opponent's forced block happens to *also* make them
+a winning four, the threat is refuted and we abandon that line — that's the
+`winningMoves(b2, …).length > 0` guard.
+
+`chooseMove` wires VCF in as a fast pre-pass at level 5, ahead of the alpha-beta
+fallback:
+
+```ts
+// L5 — hunt for a forced win via continuous fours before searching
+if (level === 5) {
+  const forced = vcf(board, me, 10);
+  if (forced) return forced;
+}
+
+// L3 plain minimax; L4/L5 alpha-beta (depth 4, ordered)
+const prune = level >= 4;
+const depth = level === 3 ? 2 : 4;
+```
+
+If `vcf` finds a forced mate within {10} forcing moves, the AI plays it instantly
+and skips the expensive search entirely. If not, it falls back to the same
+ordered alpha-beta level 4 uses. Best case: a deep guaranteed win for almost no
+cost. Worst case: it's never weaker than level 4.
+
+## Judgment: when to use ruflo — and when not to
+
+You now know the whole harness. The real skill isn't running it; it's reading
+the room. Here is the honest, even-handed version.
+
+**Lean on ruflo when coordination pays for itself:**
+
+- multi-file features where pieces have to agree on shared shapes
+- parallel research — fan several agents at a problem at once
+- work that spans sessions, where memory carries decisions forward
+- coordinated review, where a hive-mind consensus beats one opinion
+
+**Skip it — just use Claude Code directly — when there's nothing to coordinate:**
+
+- single-file edits and one-to-two-line fixes
+- config tweaks, dependency bumps, formatting
+- one-off scripts you'll run once and delete
+- questions you just want answered
+
+<Callout type="warn" title="the skill is knowing which mode you're in">
+The harness is a power tool, not a default. Wrapping a one-line fix in a
+five-agent swarm is slower, pricier, and *more* error-prone than typing the fix.
+This site was built by switching deliberately between the two modes —
+hand-editing the scaffold, hand-building and test-verifying the AI ladder, and
+fanning out a *real* swarm to write these very lessons. The cost of
+over-reaching is real; spend coordination only where it buys you something.
+</Callout>
+
+## Your game so far
+
+The opponent is now near-unbeatable. Level 5 hunts for a forced mate first, and
+falls back to deep pruned search when there isn't one. The game is
+feature-complete — five difficulty tiers, real win detection, and an AI that
+will punish a loose four every single time.
+
+<LessonBoard snapshot={7} caption="Level 5: leave a four open and it finds the forced win." />
+
+<Checkpoint snapshot={7}>
+Set the AI to level 5 and try to build an unblocked four — it should find the
+forced win and end the game before you recover. Then drop to level 4 and feel
+the difference: still strong, but no forced-mate radar.
+</Checkpoint>
+
+One thing remains: shipping it. In the final lesson we'll wire up GitHub
+automation — letting ruflo open the PR, run review, and carry this game the last
+mile to a live deploy.

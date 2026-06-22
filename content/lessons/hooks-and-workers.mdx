@@ -1,0 +1,157 @@
+Agents and skills are things you *invoke*. Hooks and background workers are
+things that happen *to* you — the automation layer that runs without anyone
+asking. This is the part of ruflo most people never look at, and it's the part
+that quietly keeps a project coherent while you're busy thinking about the next
+move.
+
+## Two kinds of automation
+
+There are exactly two automated surfaces, and they fire at different times:
+
+| Surface | Trigger | Cost |
+| --- | --- | --- |
+| **Hooks** | synchronously, on *your* tool calls | cheap — a small node script |
+| **Workers** | on a schedule or threshold, in the background | expensive — each spawns a Claude session |
+
+Hooks are reflexes. Workers are chores. Keep them separate in your head and the
+rest of this lesson is easy.
+
+## Hooks: reflexes on every tool call
+
+`init` wired seven hook types into `.claude/settings.json`. Each one points at
+the same dispatcher with a different verb:
+
+```json
+"PreToolUse": [
+  { "matcher": "Bash", "hooks": [{ "command": "… hook-handler.cjs pre-bash" }] },
+  { "matcher": "Write|Edit|MultiEdit", "hooks": [{ "command": "… pre-edit" }] }
+],
+"PostToolUse": [
+  { "matcher": "Write|Edit|MultiEdit", "hooks": [{ "command": "… post-edit" }] },
+  { "matcher": "Bash", "hooks": [{ "command": "… post-bash" }] }
+]
+```
+
+The full set covers the whole lifecycle of a turn:
+
+- **PreToolUse / PostToolUse (Bash)** — guard and record shell commands.
+- **PreToolUse / PostToolUse (Edit)** — validate a write before it lands, capture it after.
+- **UserPromptSubmit** — `route` your prompt to the right agent before Claude even reads it.
+- **SessionStart** — `session-restore` your memory and intelligence from the last session.
+- **SessionEnd** — flush and `consolidate` everything before the lights go out.
+
+<Callout type="note" title="hooks are deterministic, not smart">
+A hook is just a script the harness runs. It can read, log, block, or reroute —
+but it doesn't reason. That's the point: reflexes should be fast and boring.
+The thinking happens in the workers and the agents they spawn.
+</Callout>
+
+## Workers: chores on a schedule
+
+A worker is a headless Claude session that sweeps your codebase for one specific
+kind of drift. Each maps onto a moment where humans reliably forget something:
+
+| Worker | Fires when… | What it does |
+| --- | --- | --- |
+| `audit` | after security-relevant changes | re-scans for vulnerabilities |
+| `optimize` | after performance work | looks for regressions and hot paths |
+| `testgaps` | after adding features | finds untested new code |
+| `map` | every 5+ file changes | refreshes the codebase map |
+| `consolidate` | periodically | merges and prunes memory |
+| `document` | when docs drift from code | updates the docs |
+
+You can run these on demand, or let the optional **daemon** fire them on
+intervals. The daemon self-stops after 12h so it never quietly burns tokens
+overnight:
+
+<Terminal title="npx ruflo daemon status">
+Status: ● RUNNING (background)   PID: 25899   TTL: 12h
+Workers: map · audit · optimize · consolidate · testgaps  (5 enabled)
+</Terminal>
+
+## This lesson's increment: making the game feel alive
+
+Up to now the game *works* — stones place, the AI plays, someone wins. This
+lesson is the polish that makes it feel *real*: animation, a difficulty
+selector, and a test suite that proves the AI isn't bluffing.
+
+**The spring stone-drop.** Each stone now animates in from nothing. The trick is
+to animate only transform and opacity, so it composites on the GPU:
+
+```tsx
+<motion.div
+  initial={animate ? { scale: 0, y: "-30%", opacity: 0 } : false}
+  animate={{ scale: 1, y: 0, opacity: 1 }}
+  transition={{ type: "spring", stiffness: 600, damping: 26, mass: 0.6 }}
+>
+```
+
+**The AI-turn orchestration.** `GameClient.tsx` watches whose turn it is and
+fires the AI exactly once per turn, with a cancel guard so a reset mid-think
+never lands a stale move:
+
+```tsx
+useEffect(() => {
+  if (mode !== "ai" || status !== "playing" || current !== aiPlays) return;
+  let cancelled = false;
+  requestMove(board, current, level).then((m) => {
+    if (!cancelled && m) play(m[0], m[1]);
+  });
+  return () => { cancelled = true; };
+}, [mode, status, current, aiPlays, level, board, requestMove, play]);
+```
+
+The difficulty selector maps `AI_LEVELS` to buttons, and *restarts* the game on
+change — you don't get to switch the AI's brain mid-fight.
+
+**The tests.** The full suite is **22 tests**. The two that matter most check
+that the AI does the obvious right thing — takes a win, blocks a loss:
+
+```ts
+describe("chooseMove — takes an immediate win", () => {
+  const winnable = () => set(newBoard(), [[7, 3], [7, 4], [7, 5], [7, 6]], P1);
+  for (const lvl of THINKING_LEVELS) {
+    it(`level ${lvl} completes the five`, () => {
+      const b = winnable();
+      const [r, c] = chooseMove(b, P1, lvl);
+      b[idx(r, c)] = P1;
+      expect(checkWin(b, r, c, P1)).not.toBeNull();
+    });
+  }
+});
+```
+
+The companion block sets up an opponent's open four and asserts the AI blocks at
+one of the two winning points. These are exactly the moves a beginner would miss
+and a finished engine never should.
+
+<Callout type="ruflo" title="testgaps maps onto exactly this moment">
+We just *added a feature* — animation, a selector, a difficulty ladder. That is
+the literal trigger for the `testgaps` worker, which sweeps for new code with no
+coverage. And notice the stone-drop respects reduced-motion: that's handled
+globally by `MotionConfig`, an accessibility hook of a different kind — the
+browser's reflex, not ruflo's. Both are the same idea: automation that protects
+quality without you remembering to ask.
+</Callout>
+
+## Why this is the right division of labor
+
+Hooks ran the *moment* you saved `Stone.tsx`: `pre-edit` validated, `post-edit`
+recorded. After five-plus files changed, `map` would refresh the codebase model.
+After the feature landed, `testgaps` would notice the new branches. None of it
+needed a prompt. That's the payoff of the automation layer — it turns "things I
+should remember to do" into "things that already happened."
+
+<LessonBoard snapshot={6} caption="Stones spring into place; pick a difficulty and the AI answers." />
+
+<Checkpoint snapshot={6}>
+Your game is now animated, has a five-level difficulty selector, and is backed
+by a 22-test suite that proves the AI takes wins and blocks losses. Hooks fired
+on every edit; the `testgaps` worker is exactly the chore your new feature
+should trigger.
+</Checkpoint>
+
+One lesson remains: the **capstone**. We'll bring the whole harness together —
+the hive-mind coordinating agents at scale, MCP tools as the connective tissue,
+and the judgment call that ties every lesson back to the first one: knowing when
+*not* to reach for any of it.
