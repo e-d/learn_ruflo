@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { MotionProvider } from "@/components/MotionProvider";
 import { SiteHeader } from "@/components/site/SiteHeader";
+import { SiteFooter } from "@/components/site/SiteFooter";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -40,6 +41,7 @@ export default function RootLayout({
         <MotionProvider>
           <SiteHeader />
           <div className="flex flex-1 flex-col">{children}</div>
+          <SiteFooter />
         </MotionProvider>
       </body>
     </html>
