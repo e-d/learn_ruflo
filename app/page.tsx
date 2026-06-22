@@ -20,7 +20,8 @@ export default function Home() {
           </Reveal>
           <Reveal delay={0.05}>
             <h1 className="mt-5 font-display text-5xl font-bold leading-[1.05] tracking-tight sm:text-6xl lg:text-7xl">
-              Learn <span className="gradient-text">ruflo</span> by building a Gomoku&nbsp;AI.
+              Learn <span className="gradient-text">ruflo</span>{" "}
+              by building a Gomoku&nbsp;AI.
             </h1>
           </Reveal>
           <Reveal delay={0.1}>
