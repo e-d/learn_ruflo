@@ -142,7 +142,7 @@ body {
 
 /* ---- Lesson code blocks (rehype-pretty-code / Shiki) ---- */
 figure[data-rehype-pretty-code-figure] {
-  margin: 0;
+  margin: 1.25rem 0;
 }
 [data-rehype-pretty-code-title] {
   border: 1px solid var(--color-line);
@@ -154,43 +154,44 @@ figure[data-rehype-pretty-code-figure] {
   font-size: 12px;
   color: var(--color-muted);
 }
-[data-rehype-pretty-code-title] + pre {
-  border-radius: 0 0 0.75rem 0.75rem;
-}
-.group > pre {
+[data-rehype-pretty-code-figure] pre {
   overflow-x: auto;
   border-radius: 0.75rem;
   border: 1px solid var(--color-line);
   background: #0d0d12;
-  padding: 0.9rem 0;
+  margin: 0;
+  padding: 0.9rem 0; /* vertical only — horizontal padding lives on each line */
   font-size: 13px;
   line-height: 1.6;
 }
-.group > pre code {
-  display: grid; /* one row per line, full-width line backgrounds */
-  font-family: var(--font-mono);
-  counter-reset: line;
+/* connect a title bar to the code block directly beneath it */
+[data-rehype-pretty-code-title] + .group pre,
+[data-rehype-pretty-code-title] + pre {
+  border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
-.group > pre code .line {
+[data-rehype-pretty-code-figure] code {
+  display: grid; /* one row per line → full-width line backgrounds */
+  font-family: var(--font-mono);
+}
+/* the horizontal padding for every code line (rehype-pretty-code uses data-line) */
+[data-rehype-pretty-code-figure] [data-line] {
   padding: 0 1rem;
   border-left: 2px solid transparent;
 }
 /* line highlight (meta {1,3-4}) and diff notations */
-.line[data-highlighted-line],
-.line.add,
-.line.remove {
+[data-line][data-highlighted-line] {
+  background: color-mix(in oklab, var(--color-accent) 14%, transparent);
   border-left-color: var(--color-accent);
 }
-.line[data-highlighted-line] {
-  background: color-mix(in oklab, var(--color-accent) 14%, transparent);
-}
-.line[data-highlighted-line-id="add"],
-.line.add {
+[data-line][data-highlighted-line-id="add"],
+[data-line].add {
   background: color-mix(in oklab, #22c55e 16%, transparent);
   border-left-color: #22c55e;
 }
-.line[data-highlighted-line-id="remove"],
-.line.remove {
+[data-line][data-highlighted-line-id="remove"],
+[data-line].remove {
   background: color-mix(in oklab, #ef4444 16%, transparent);
   border-left-color: #ef4444;
 }

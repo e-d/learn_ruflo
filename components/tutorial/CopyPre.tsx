@@ -19,7 +19,7 @@ export function CopyPre(props: React.HTMLAttributes<HTMLPreElement>) {
   };
 
   return (
-    <div className="group relative my-5">
+    <div className="group relative">
       <button
         onClick={copy}
         aria-label="Copy code"
