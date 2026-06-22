@@ -8,6 +8,11 @@ ruflo capability with one piece of the game.
 Built with **Next.js (App Router)**, **Tailwind CSS v4**, **Motion**, and **MDX**
 (Shiki-highlighted code via `rehype-pretty-code`).
 
+[![Live demo](https://img.shields.io/badge/demo-live-22d3ee)](https://learnruflo.vercel.app)
+[![License: MIT](https://img.shields.io/badge/license-MIT-7c5cff)](LICENSE)
+
+**▶ Live demo: [learnruflo.vercel.app](https://learnruflo.vercel.app)**
+
 ## Develop
 
 ```bash
@@ -47,6 +52,11 @@ vercel --prod
 Set `NEXT_PUBLIC_SITE_URL` to your deployed origin so Open Graph metadata resolves
 to absolute URLs.
 
-> This project lives alongside a ruflo install (`.claude/`, `.claude-flow/`,
-> `.mcp.json`). `CLAUDE.md` holds the ruflo harness guidance; it imports Next.js's
-> `AGENTS.md` rules at the bottom.
+> The tutorial was built *with* ruflo (an agent meta-harness for Claude). The
+> ruflo runtime files (`.claude/`, `.claude-flow/`, `.swarm/`, `.mcp.json`, the
+> local memory DBs) are intentionally **git-ignored** — they're local tooling
+> state, not part of the app.
+
+## License
+
+[MIT](LICENSE) © 2026 e-d
